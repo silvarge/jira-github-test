@@ -17,7 +17,7 @@ jobs:
 
       - name: Create and push branch
         run: |
-          # Jira에서 받은 데이터
+#           Jira에서 받은 데이터
           ISSUE_KEY="${{ github.event.client_payload.issue_key }}"
           ISSUE_SUMMARY="${{ github.event.client_payload.issue_summary }}"
           ISSUE_TYPE="${{ github.event.client_payload.issue_type }}"

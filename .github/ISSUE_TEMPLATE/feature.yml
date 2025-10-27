@@ -1,0 +1,49 @@
+name: "✨ Feature"
+description: "새로운 기능 추가"
+labels: [ "feat" ]
+body:
+  - type: input
+    id: _parent_jira_epic
+    attributes:
+      label: Parent Jira Epic
+      description: "상위 Jira Epic 키 (예: DCIU-100)"
+      placeholder: DCIU-XXX
+    validations:
+      required: true
+      pattern: '^(DCIU-[0-9]+)?$'
+
+  - type: input
+    id: _branch_keyword
+    attributes:
+      label: Branch Keyword
+      description: 브랜치명에 사용할 키워드
+      placeholder: login-feature
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: 📄 설명
+      description: 새로운 기능에 대한 설명을 작성해 주세요.
+      placeholder: 자세히 적을수록 좋습니다!
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: ✅ 작업할 내용
+      description: 할 일을 체크박스 형태로 작성해주세요.
+      placeholder: 최대한 세분화 해서 적어주세요!
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: 🙋 참조(References)
+      description: 해당 이슈과 관련된 레퍼런스를 참조해주세요
+      value: |
+        - Reference1
+    validations:
+      required: false

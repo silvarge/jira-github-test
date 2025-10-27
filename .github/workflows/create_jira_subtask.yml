@@ -1,0 +1,164 @@
+name: Create Jira Task and Branch
+
+env:
+  BASE_BRANCH: dev
+
+on:
+  issues:
+    types: [assigned]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  create-jira-and-branch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Login to Jira
+        uses: atlassian/gajira-login@v3
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+
+      - name: Parse GitHub Issue
+        uses: stefanbuck/github-issue-parser@v3
+        id: issue-parser
+        with:
+          template-path: .github/ISSUE_TEMPLATE/*.yml
+      
+      - name: Debug parser output
+        run: |
+          echo "Parent key: '${{ steps.issue-parser.outputs.issueparser__parent_jira_epic }}'"
+          echo "Branch keyword: '${{ steps.issue-parser.outputs.issueparser__branch_keyword }}'"
+          echo "All outputs:"
+          echo '${{ toJSON(steps.issue-parser.outputs) }}'
+
+      - name: Convert to Jira Syntax
+        uses: peter-evans/jira2md@v1
+        id: md2jira
+        with:
+          input-text: |
+            h3. GitHub Issue
+            * Link: ${{ github.event.issue.html_url }}
+            
+            ${{ github.event.issue.body }}
+          mode: md2jira
+
+      - name: Determine branch type from label
+        id: branch_type
+        run: |
+          labels=$(echo "${{ join(github.event.issue.labels.*.name, ',') }}" | tr '[:upper:]' '[:lower:]')
+          
+          if [[ "$labels" == *"fix"* ]] || [[ "$labels" == *"bug"* ]]; then
+            echo "type=fix" >> $GITHUB_OUTPUT
+            echo "prefix=Bug" >> $GITHUB_OUTPUT
+          elif [[ "$labels" == *"feat"* ]] || [[ "$labels" == *"feature"* ]]; then
+            echo "type=feat" >> $GITHUB_OUTPUT
+            echo "prefix=Feature" >> $GITHUB_OUTPUT
+          elif [[ "$labels" == *"🍪chore"* ]] || [[ "$labels" == *"chore"* ]]; then
+            echo "type=chore" >> $GITHUB_OUTPUT
+            echo "prefix=Chore" >> $GITHUB_OUTPUT
+          elif [[ "$labels" == *"🔧refactor"* ]] || [[ "$labels" == *"refactor"* ]]; then
+            echo "type=refactor" >> $GITHUB_OUTPUT
+            echo "prefix=Refactor" >> $GITHUB_OUTPUT
+          elif [[ "$labels" == *"🧩test"* ]] || [[ "$labels" == *"test"* ]]; then
+            echo "type=test" >> $GITHUB_OUTPUT
+            echo "prefix=Test" >> $GITHUB_OUTPUT
+          elif [[ "$labels" == *"📝docs"* ]] || [[ "$labels" == *"docs"* ]]; then
+            echo "type=docs" >> $GITHUB_OUTPUT
+            echo "prefix=Docs" >> $GITHUB_OUTPUT
+          elif [[ "$labels" == *"❗hotfix"* ]] || [[ "$labels" == *"hotfix"* ]]; then
+            echo "type=hotfix" >> $GITHUB_OUTPUT
+            echo "prefix=Hotfix" >> $GITHUB_OUTPUT
+          elif [[ "$labels" == *"🚀deploy"* ]] || [[ "$labels" == *"deploy"* ]]; then
+            echo "type=deploy" >> $GITHUB_OUTPUT
+            echo "prefix=Deploy" >> $GITHUB_OUTPUT
+          else
+            echo "type=feat" >> $GITHUB_OUTPUT
+            echo "prefix=Feature" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Jira Task
+        id: create-jira
+        uses: atlassian/gajira-create@v3
+        with:
+          project: ${{ vars.JIRA_PROJECT_KEY }}
+          issuetype: Task
+          summary: '${{ github.event.issue.title }}'
+          description: '${{ steps.md2jira.outputs.output-text }}'
+          fields: |
+            {
+              "parent": {
+                "key": "${{ steps.issue-parser.outputs.issueparser__parent_jira_epic }}"
+              }
+            }
+
+      - name: Log created issue
+        run: echo "Jira Issue ${{ steps.issue-parser.outputs.parentKey }}/${{ steps.create-jira.outputs.issue }} was created"
+
+      - name: Update GitHub Issue Title
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'update-issue'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: '${{ github.event.issue.title }} (${{ steps.create-jira.outputs.issue }})'
+
+      - name: Sanitize branch keyword
+        id: sanitize
+        run: |
+          KEYWORD="${{ steps.issue-parser.outputs.issueparser__branch_keyword }}"
+          CLEAN=$(echo "$KEYWORD" | 
+            iconv -f utf-8 -t ascii//TRANSLIT//IGNORE |
+            tr -cd '[:alnum:]-_' |
+            tr '[:upper:]' '[:lower:]' |
+            sed 's/^-//;s/-$//' |
+            sed 's/--*/-/g' |
+            cut -c 1-30)
+          echo "clean=$CLEAN" >> $GITHUB_OUTPUT
+
+      - name: Create Git Branch
+        run: |
+          TYPE="${{ steps.branch_type.outputs.type }}"
+          KEYWORD="${{ steps.sanitize.outputs.clean }}"
+          JIRA_KEY="${{ steps.create-jira.outputs.issue }}"
+          GITHUB_ISSUE="${{ github.event.issue.number }}"
+          BRANCH_NAME="${TYPE}/${KEYWORD}-${JIRA_KEY}-#${GITHUB_ISSUE}"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME"
+          
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: Add Comment
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            ## ✅ Created
+            
+            **Jira:** [${{ steps.create-jira.outputs.issue }}](${{ secrets.JIRA_BASE_URL }}/browse/${{ steps.create-jira.outputs.issue }})
+            **Branch:** `${{ env.BRANCH_NAME }}`
+            ```bash
+            git fetch origin
+            git checkout ${{ env.BRANCH_NAME }}
+            ```
+
+      - name: Update Jira
+        uses: atlassian/gajira-comment@v3
+        with:
+          issue: ${{ steps.create-jira.outputs.issue }}
+          comment: |
+            GitHub Issue: ${{ github.event.issue.html_url }}
+            Branch: ${{ env.BRANCH_NAME }}

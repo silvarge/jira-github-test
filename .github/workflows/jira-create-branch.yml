@@ -1,0 +1,96 @@
+name: Create Branch from Jira
+
+on:
+  repository_dispatch:
+    types: [create-branch]
+
+permissions:
+  contents: write
+
+jobs:
+  create-branch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create and push branch
+        run: |
+          # Jira에서 받은 데이터
+          ISSUE_KEY="${{ github.event.client_payload.issue_key }}"
+          ISSUE_SUMMARY="${{ github.event.client_payload.issue_summary }}"
+          ISSUE_TYPE="${{ github.event.client_payload.issue_type }}"
+          
+          # 브랜치 이름 생성 (예: feat/OPS-123)
+          BRANCH_PREFIX="feat"
+          if [[ "$ISSUE_TYPE" == "Bug" ]]; then
+            BRANCH_PREFIX="fix"
+          fi
+          
+          BRANCH_NAME="${BRANCH_PREFIX}/${ISSUE_KEY}"
+          
+          # Git 설정
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 브랜치 생성 및 푸시
+          git checkout -b "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME"
+          
+          echo "✅ Created branch: $BRANCH_NAME"
+#
+#### 3. **Jira Automation 규칙 생성**
+#
+#Jira에서:
+#
+#  1. **프로젝트 설정 → 자동화 → "규칙 만들기"**
+#
+#  2. **트리거 설정**
+#  - "컴포넌트 추가" → **"Issue assigned"** 선택
+#  - Issue types: **Sub-task** 체크
+#
+#  3. **웹 요청 액션 추가**
+#- "새 컴포넌트" → **"Send web request"** 선택
+#
+#설정값:
+#  ```
+#Webhook URL:
+#  https://api.github.com/repos/silvarge/jira-github-test/dispatches
+#
+#HTTP Method:
+#  POST
+#
+#Headers:
+#Accept: application/vnd.github+json
+#Authorization: Bearer [여기에 GitHub Token 입력]
+#Content-Type: application/json
+#
+#Webhook Body (Custom data):
+#  {
+#    "event_type": "create-branch",
+#    "client_payload": {
+#      "issue_key": "{{issue.key}}",
+#      "issue_summary": "{{issue.summary}}",
+#      "issue_type": "{{issue.issueType.name}}",
+#      "project_key": "{{issue.project.key}}",
+#      "assignee": "{{issue.assignee.displayName}}"
+#    }
+#  }
+#  ```
+
+#  4. **댓글 추가 (선택사항)**
+#- "새 컴포넌트" → **"Comment on issue"**
+#
+#댓글 내용:
+#  ```
+#GitHub 브랜치가 생성되었습니다: {{issue.key}}
+#
+#Repository: https://github.com/silvarge/jira-github-test
+#Branch: feat/{{issue.key}}
+#
+#체크아웃:
+#  {code}
+#  git fetch origin
+#  git checkout feat/{{issue.key}}
+#  {code}
